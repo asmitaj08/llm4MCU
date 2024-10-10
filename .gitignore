@@ -1,0 +1,5 @@
+.env
+images/*
+figures/*
+.ipynb_checkpoints/*
+multimodal-rag.ipynb
