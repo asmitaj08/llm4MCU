@@ -3,7 +3,7 @@
 N.B : Used Python Version : 3.10
 
 
-After cloning this repo, add the env file to the directory
+After cloning this repo, add the env file to the directory (With openAI key)
 
 Run the first cell (pip...) to install all necessary libraries 
 
