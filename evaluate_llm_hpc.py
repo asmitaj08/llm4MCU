@@ -350,7 +350,7 @@ def evaluate(name="", rag = None, json_q_a_file_path="./nrf52840.json"):
             scores.append(future.result())
 
     return scores
-
+all_datasheet_scores = []
 for key, file_paths in [('stm32f0xx', ['./pdf_partitioning_result/chroma_dbs/chroma_db_stm32f0xx',
  './pdf_partitioning_result/pickle_files/stm32f0xx.pkl',
  './evaluation_mcu_svd_dataset/datasets_stm32f0xx'])]:
