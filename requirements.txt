@@ -1,0 +1,5 @@
+openai
+tqdm
+python-dotenv
+cmsis_svd
+multiprocessing
