@@ -31,9 +31,10 @@ db_path = "../data_ollama_deepseek_r1_14b/pdf_partitioning_result/chroma_dbs/chr
 pickle_path = "../data_ollama_deepseek_r1_14b/pdf_partitioning_result/pickle_files/nrf52820.pkl"
 
 model_name = "deepseek-r1:14b" 
+embedd_model = "nomic-embedd-text"
 
 def load_chroma_db(local_directory=db_path):
-    embeddings = OllamaEmbeddings(model=model_name)
+    embeddings = OllamaEmbeddings(model=embedd_model)
     return Chroma(persist_directory=local_directory, embedding_function=embeddings)
 
 def categorize_elements(raw_pdf_elements):
