@@ -1,6 +1,7 @@
 .env
-images/*
+**/images*/
 figures/*
 .ipynb_checkpoints/*
 multimodal-rag.ipynb
 .qodo
+**/*.zip

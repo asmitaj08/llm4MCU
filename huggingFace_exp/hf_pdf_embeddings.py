@@ -2,7 +2,7 @@ import pickle
 import time
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_chroma import Chroma
+from langchain_community.vectorstores import Chroma
 import base64
 import os
 from PIL import Image
