@@ -205,6 +205,9 @@ Give a concise summary of the image that is well optimized for retrieval."""
 
     return img_base64_list, image_summaries
 
+def summarizer_worker(args):
+        b64, p = args
+        return ocr_then_blip(b64, prompt=p)
 
 def generate_img_summaries_parallel(path, prompt=None, max_workers=None):
     """
@@ -233,14 +236,10 @@ Give a concise summary of the image that is well optimized for retrieval."""
     # Wrap prompt with base64 for each
     args = [(b64, prompt) for b64 in base64_images]
 
-    def summarizer_worker(args):
-        b64, p = args
-        return ocr_then_blip(b64, prompt=p)
-
     # Parallel summarization
     max_workers = max_workers or min(cpu_count(), 8)
     with Pool(processes=max_workers) as pool:
-        image_summaries = list(tqdm(pool.imap(summarizer_worker, args), total=len(args), desc="Summarizing images"))
+        image_summaries = list(tqdm(pool.starmap(summarizer_worker, args), total=len(args), desc="Summarizing images"))
 
     return base64_images, image_summaries
 
