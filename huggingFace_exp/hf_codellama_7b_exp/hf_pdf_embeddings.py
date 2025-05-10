@@ -15,7 +15,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline, BitsAndB
 import torch
 from dotenv import load_dotenv
 import sys
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool, cpu_count, get_context
 from tqdm import tqdm
 
 load_dotenv()
@@ -238,7 +238,8 @@ Give a concise summary of the image that is well optimized for retrieval."""
 
     # Parallel summarization
     max_workers = max_workers or min(cpu_count(), 8)
-    with Pool(processes=max_workers) as pool:
+    # with Pool(processes=max_workers) as pool:
+    with get_context("spawn").Pool(processes=max_workers) as pool:
         image_summaries = list(tqdm(pool.map(summarizer_worker, args), total=len(args), desc="Summarizing images"))
 
     return base64_images, image_summaries
