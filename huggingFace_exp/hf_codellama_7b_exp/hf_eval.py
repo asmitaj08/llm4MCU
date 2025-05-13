@@ -34,8 +34,6 @@ import json
 import random
 from peft import PeftModel
 
-chroma_db_path = "hf_codellama_7b_exp/chroma_dbs/nRF52840_db"
-pickle_path = "hf_codellama_7b_exp/pickle_files/nRF52840_summarized.pkl"
 
 load_dotenv()
 base_model_id = "codellama/CodeLlama-7b-Instruct-hf"
@@ -65,57 +63,138 @@ model = AutoModelForCausalLM.from_pretrained(
     torch_dtype=torch.float16
 )
 
-# Create Hugging Face pipeline
-pipe = pipeline(
-    "text-generation",
-    model=model,
-    tokenizer=tokenizer,
-    pad_token_id=model.config.eos_token_id, #avoiding warning Setting `pad_token_id` to `eos_token_id`:2 for open-end generation.
-    max_new_tokens=768,
-    # temperature=0.0, # no need as do_sample=False
-    do_sample=False
-)
-
-# Wrap it in LangChain-compatible interface
-model_pipe = HuggingFacePipeline(pipeline=pipe)
+# # Create Hugging Face pipeline
+# pipe = pipeline(
+#     "text-generation",
+#     model=model,
+#     tokenizer=tokenizer,
+#     pad_token_id=model.config.eos_token_id, #avoiding warning Setting `pad_token_id` to `eos_token_id`:2 for open-end generation.
+#     max_new_tokens=512,
+#     # temperature=0.0, # no need as do_sample=False
+#     do_sample=False,
+#     return_full_text=False
+# )
+# # Wrap it in LangChain-compatible interface
+# model_pipe = HuggingFacePipeline(pipeline=pipe)
 
 ##ft 
 ft_model_dir = "codellama_7b/final_model"
 assert os.path.exists(ft_model_dir), f"Finetuned Model directory not found: {ft_model_dir}"
-
 # Load LoRA adapter
 ft_model = PeftModel.from_pretrained(model, ft_model_dir)
-ft_model.eval()
+# # Create Hugging Face pipeline for finetuned model
+# pipe_ft = pipeline(
+#     "text-generation",
+#     model=ft_model,
+#     tokenizer=tokenizer,
+#     pad_token_id=model.config.eos_token_id, #avoiding warning Setting `pad_token_id` to `eos_token_id`:2 for open-end generation.
+#     max_new_tokens=512,
+#     # temperature=0.0, # no need as do_sample=False
+#     do_sample=False,
+#     return_full_text=False
+# )
+# # Wrap it in LangChain-compatible interface
+# model_pipe_ft = HuggingFacePipeline(pipeline=pipe_ft)
 
-def ask_bot_ft(question: str) -> str:
-    formatted_prompt = f"### Instruction:\n{question}\n\n### Response:\n"
-    inputs = tokenizer(formatted_prompt, return_tensors="pt").to(ft_model.device)
+# def ask_bot(chain_multimodal_rag, query):
+#     raw_output = chain_multimodal_rag.invoke(query)
+#     # print(f"Raw output : {raw_output}\n")
+#     # print("*********************")
+#     for line in raw_output.strip().splitlines():
+#         if line.strip():
+#             return line.strip()
+#     return raw_output.strip()
+
+# def ask_bot_ft(question: str) -> str:
+#     formatted_prompt = f"### Instruction:\n{question}\n\n### Response:\n"
+#     inputs = tokenizer(formatted_prompt, return_tensors="pt").to(ft_model.device)
+#     with torch.no_grad():
+#         outputs = ft_model.generate(
+#             **inputs,
+#             max_new_tokens=512,
+#             temperature=0.7,
+#             top_p=0.95,
+#             do_sample=True
+#         )
+#     generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+#     answer = generated_text.replace(formatted_prompt, "").strip()
+#     # Optionally post-process
+#     # return generated_text.replace(formatted_prompt, "").strip()
+#     # Normalize: clean each line
+#     lines = [
+#         re.sub(r"[.,:;!?]+$", "", line.strip())  # Remove trailing punctuation
+#         for line in answer.splitlines()
+#         if line.strip()
+#     ]
+
+#     return ", ".join(lines)
+
+
+def ask_bot(retriever_multi_vector_img, question, curr_model,few_shot_examples=None) -> str:
+    # Step 1: Retrieve relevant summaries (text + table + image) via RAG
+    docs = retriever_multi_vector_img.get_relevant_documents(question)
+    summaries = [
+    doc if isinstance(doc, str) else doc.page_content for doc in docs
+   ]
+
+    # system_prompt = (
+    #     "You are an expert on microcontrollers and can provide detailed information about their peripherals, registers, and fields.\n"
+    #     "Answer the user question concisely based  on the context provided.\n"
+    #     "ONLY output the direct answer as a word, number, address, or short phrase.\n"
+    #     "Do NOT repeat the question or context. Do NOT give explanations or full sentences.\n\n"
+    #     # f"User question: {data_dict['question']}\n\n"
+    # )
+
+    system_prompt = (
+        "You are an expert on microcontrollers and can provide detailed information about their peripherals, registers, and fields.\n"
+        "ONLY answer with valid register names, addresses, values or lists.\n"
+        "Do NOT provide full sentence for the answer\n"
+        "Do not explain. Do not repeat the question."
+    )
+
+    context = "\n- " + "\n- ".join(summaries) if summaries else ""
+
+    prompt = (
+        "[INST] <<SYS>>\n"
+        f"{system_prompt}\n"
+        "<</SYS>>\n\n"
+    )
+    if few_shot_examples :
+        # print(f"****few_shot_examples : {few_shot_examples}")
+        prompt += f"{few_shot_examples}\n"
+    # else :
+    #     print("*****No few_shot examples")
+    prompt += f"Now answer:\n"
+    if context:
+        prompt += f"Context:{context}\n"
+    # else:
+    #     print("*****No context retrived")
+
+    prompt += f"Question: {question}\nAnswer: [/INST]"
+    # Step 3: Tokenize and generate
+    inputs = tokenizer(prompt, return_tensors="pt").to(curr_model.device)
     with torch.no_grad():
-        outputs = ft_model.generate(
+        outputs = curr_model.generate(
             **inputs,
-            max_new_tokens=512,
-            temperature=0.7,
-            top_p=0.95,
-            do_sample=True
+            max_new_tokens=768,
+            # temperature=0.7,  
+            # top_p=0.95,
+            # do_sample=True,
+            do_sample=False,
+            pad_token_id=model.config.eos_token_id
         )
     generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    answer = generated_text.replace(formatted_prompt, "").strip()
-    # Optionally post-process
-    # return generated_text.replace(formatted_prompt, "").strip()
-    # Normalize: clean each line
-    lines = [
-        re.sub(r"[.,:;!?]+$", "", line.strip())  # Remove trailing punctuation
-        for line in answer.splitlines()
-        if line.strip()
-    ]
 
-    return ", ".join(lines)
+    # Step 4: Extract answer cleanly
+    answer = generated_text.replace(prompt, "").strip()
+    return answer.split("\n")[0].strip()
+    # return answer
 
 def load_chroma_db(local_directory=chroma_db_path):
     return Chroma(persist_directory=local_directory, embedding_function=embedding)
 
 
-def create_multi_vector_retriever(vectorstore, text_summaries, texts, table_summaries, tables, image_summaries, images):
+def create_multi_vector_retriever(vectorstore, text_summaries, texts, table_summaries, tables, image_summaries, images, image_ocr_raw):
     """
     Create retriever that indexes summaries, but returns raw images or texts
     """
@@ -149,118 +228,11 @@ def create_multi_vector_retriever(vectorstore, text_summaries, texts, table_summ
         add_documents(retriever, table_summaries, tables)
     # Check that image_summaries is not empty before adding
     if image_summaries:
-        add_documents(retriever, image_summaries, images) #changing this as codellama doesn't deal directly with images
-        add_documents(retriever, image_summaries, image_summaries)
+        # add_documents(retriever, image_summaries, images) #changing this as codellama doesn't deal directly with images
+        add_documents(retriever, image_summaries, image_ocr_raw)
+        # add_documents(retriever, image_summaries, image_summaries)
 
     return retriever
-
-def plt_img_base64(img_base64):
-    """Disply base64 encoded string as image"""
-    # Create an HTML img tag with the base64 string as the source
-    image_html = f'<img src="data:image/jpeg;base64,{img_base64}" />'
-    # Display the image by rendering the HTML
-    display(HTML(image_html))
-
-def looks_like_base64(sb):
-    """Check if the string looks like base64"""
-    return re.match("^[A-Za-z0-9+/]+[=]{0,2}$", sb) is not None
-
-
-def is_image_data(b64data):
-    """
-    Check if the base64 data is an image by looking at the start of the data
-    """
-    image_signatures = {
-        b"\xFF\xD8\xFF": "jpg",
-        b"\x89\x50\x4E\x47\x0D\x0A\x1A\x0A": "png",
-        b"\x47\x49\x46\x38": "gif",
-        b"\x52\x49\x46\x46": "webp",
-    }
-    try:
-        header = base64.b64decode(b64data)[:8]  # Decode and get the first 8 bytes
-        for sig, format in image_signatures.items():
-            if header.startswith(sig):
-                return True
-        return False
-    except Exception:
-        return False
-
-def resize_base64_image(base64_string, size=(128, 128)):
-    """
-    Resize an image encoded as a Base64 string
-    """
-    # Decode the Base64 string
-    img_data = base64.b64decode(base64_string)
-    img = Image.open(io.BytesIO(img_data))
-
-    # Resize the image
-    resized_img = img.resize(size, Image.LANCZOS)
-
-    # Save the resized image to a bytes buffer
-    buffered = io.BytesIO()
-    resized_img.save(buffered, format=img.format)
-
-    # Encode the resized image to Base64
-    return base64.b64encode(buffered.getvalue()).decode("utf-8")
-
-def split_image_text_types(docs):
-    b64_images = []
-    texts = []
-    for doc in docs:
-        if isinstance(doc, Document):
-            content = doc.page_content
-        else:
-            content = doc
-
-        # If this document is a base64 image (raw), skip it
-        if looks_like_base64(content) and is_image_data(content): #we don'rt need it in this case as we r not dealing with images during inferences
-            # print("\n**********found base64")
-            continue  # raw image, not usable here
-        else:
-            texts.append(content)
-
-    return {"images": [], "texts": texts}
-
-
-def text_only_prompt_func(data_dict):
-    """
-    Formats a CodeLLaMA-compatible prompt with summaries and question.
-    """
-    prompt = (
-        "You are an expert on microcontrollers and can provide detailed information about their peripherals, registers, and fields.\n"
-        "Answer the user question concisely based  on the context provided.\n"
-        "ONLY output the direct answer as a word, number, address, or short phrase.\n"
-        "Do NOT repeat the question or context. Do NOT give explanations or full sentences.\n\n"
-        # f"User question: {data_dict['question']}\n\n"
-    )
-    if data_dict["context"]["texts"]:
-        prompt += "Relevant Context:\n" + "\n\n".join(data_dict["context"]["texts"])
-
-    instruction_block = (
-        f"Context:\n{prompt}\n\n"
-        f"Question: {data_dict['question']}"
-    )
-
-    # Final CodeLLaMA prompt format
-    return f"### Instruction:\n{instruction_block}\n\n### Response:\n"
-
-def multi_modal_rag_chain(retriever, curr_model):
-    """
-    Multi-modal RAG chain
-    """
-
-    # RAG pipeline
-    chain = (
-        {
-            "context": retriever | RunnableLambda(split_image_text_types),
-            "question": RunnablePassthrough(),
-        }
-        | RunnableLambda(text_only_prompt_func)
-        | curr_model  # MM_LLM
-        | StrOutputParser()
-    )
-
-    return chain
 
 def init_rag(chroma_path, pickle_path):
     # if os.path.exists(db_path) and os.path.exists(pickle_path):
@@ -277,6 +249,7 @@ def init_rag(chroma_path, pickle_path):
     table_summaries = loaded_data['table_summaries']
     img_base64_list = loaded_data['img_base64_list']
     image_summaries = loaded_data['image_summaries']
+    img_raw_ocr = loaded_data['img_raw_ocr']
 
     retriever_multi_vector_img = create_multi_vector_retriever(
         vectorstore,
@@ -286,31 +259,10 @@ def init_rag(chroma_path, pickle_path):
         tables,
         image_summaries,
         img_base64_list,
+        img_raw_ocr,
     )
-    chain_multimodal_rag = multi_modal_rag_chain(retriever_multi_vector_img)
-    return chain_multimodal_rag
+    return retriever_multi_vector_img
 
-rag_pipeline = init_rag(chroma_db_path, pickle_path)
-
-def ask_bot(chain_multimodal_rag, query):
-    raw_output = chain_multimodal_rag.invoke(query)
-    # print(f"Raw output : {raw_output}\n")
-    # print("*********************")
-
-    # Extract after prompt marker
-    if "### Response:" in raw_output:
-        answer = raw_output.split("### Response:")[-1].strip()
-    else:
-        answer = raw_output.strip()
-
-    # Normalize: clean each line
-    lines = [
-        re.sub(r"[.,:;!?]+$", "", line.strip())  # Remove trailing punctuation
-        for line in answer.splitlines()
-        if line.strip()
-    ]
-
-    return ", ".join(lines)
 
 def compute_similarity(model_output: str, ground_truth: str) -> tuple:
     # Same as before
@@ -319,7 +271,7 @@ def compute_similarity(model_output: str, ground_truth: str) -> tuple:
     return cos_sim
 
 
-def evaluate(name="", rag = None, json_q_a_file_path="./nrf52840.json"):
+def evaluate(name="", rag_retreiver = None, json_q_a_file_path="./nrf52840.json"):
     # Same as before
     # with open(json_q_a_file_path, 'r') as file:
     #     q_a = json.load(file)
@@ -351,7 +303,7 @@ def evaluate(name="", rag = None, json_q_a_file_path="./nrf52840.json"):
     
     few_shot_context+="\n\n"
 
-    print(f"******few_shot_context : {few_shot_context}")
+    # print(f"******few_shot_context : {few_shot_context}")
 
     # Create a subset excluding the few-shot examples
     remaining_q_a = [example for example in q_a if example not in few_shot_examples]
@@ -371,40 +323,25 @@ def evaluate(name="", rag = None, json_q_a_file_path="./nrf52840.json"):
             question = full_text
             ground_truth = ""
       
-        rag_model_output = ask_bot(rag, question)
-        few_shot_model_output = ask_bot(rag, few_shot_context + " " + question)
+        rag_model_output = ask_bot(rag_retreiver, question, model)
+        few_shot_model_output = ask_bot(rag_retreiver, question, model, few_shot_context)
+        ft_rag_model_output = ask_bot(rag_retreiver,question,ft_model)
+        ft_few_shot_model_output = ask_bot(rag_retreiver,question,ft_model,few_shot_context)
 
         rag_cos_sim = compute_similarity(rag_model_output, ground_truth)
         few_shot_cos_sim = compute_similarity(few_shot_model_output, ground_truth)
-
-
-        ft_reg = client.chat.completions.create(
-            model='ft:gpt-4o-2024-08-06:ucd-aseec:svd-finetune:AUNjCF3m',
-            messages=[q_a_pair["messages"][0], q_a_pair["messages"][1]],
-            max_tokens=1024,
-            temperature=0
-        )
-        ft_reg_model_output = ft_reg.choices[0].message.content
-
-        ft_few_shot = client.chat.completions.create(
-            model='ft:gpt-4o-2024-08-06:ucd-aseec:svd-finetune:AUNjCF3m',
-            messages=[{"role": "system", "content":few_shot_context}, q_a_pair["messages"][0], q_a_pair["messages"][1]],
-            max_tokens=1024,
-            temperature=0
-        )
-
-        ft_few_shot_model_output = ft_few_shot.choices[0].message.content
-
-        ft_reg_cos_sim = compute_similarity(ft_reg_model_output, ground_truth)
+        ft_reg_cos_sim = compute_similarity(ft_rag_model_output, ground_truth)
         ft_few_shot_cos_sim = compute_similarity(ft_few_shot_model_output, ground_truth)
 
         return {
             'datasheet': name,
             'question': question,
             'ground_truth': ground_truth,
-            'baseline model_output': reg_model_output,
+            'baseline model_output': rag_model_output,
             'few shot model_output': few_shot_model_output,
-            'baseline cosine_similarity': reg_cos_sim,
+            'ft model output' : ft_rag_model_output,
+            'ft few_shot model output' : ft_few_shot_model_output,
+            'baseline cosine_similarity': rag_cos_sim,
             'ft cosine_similarity': ft_reg_cos_sim,
             'few_shot cosine_similarity': few_shot_cos_sim,
             'ft few_shot cosine_similarity': ft_few_shot_cos_sim
@@ -417,3 +354,34 @@ def evaluate(name="", rag = None, json_q_a_file_path="./nrf52840.json"):
             scores.append(future.result())
 
     return scores
+
+mcu_name = "nRF52840"
+chroma_db_path = f"hf_codellama_7b_exp/chroma_dbs/{mcu_name}_db"
+pickle_path = f"hf_codellama_7b_exp/pickle_files/{mcu_name}_summarized.pkl"
+dataset_path = f"hf_codellama_7b_exp/evaluation_mcu_svd_dataset/datasets_{mcu_name}"
+
+all_datasheet_scores = []
+for key, file_paths in [(mcu_name, [chroma_db_path,pickle_path,dataset_path])]:
+    print(key)
+    chroma_db_path, pickle_path, eval_q_a_json_path = file_paths
+    rag_retreiver = init_rag(chroma_db_path, pickle_path)
+ 
+    print("Finished Creating RAG pipeline")
+
+    main_data_path = os.path.join(eval_q_a_json_path, "main_data.jsonl")
+    all_scores = evaluate(key, rag_retreiver, main_data_path)
+    print("Finished Evaluation")
+
+    all_datasheet_scores.extend(all_scores)
+
+
+csv_file = f"hf_codellama_7b_exp/eval_outcome/{mcu_name}_output.csv"
+
+# Define the column names based on dictionary keys
+fieldnames = all_datasheet_scores[0].keys()
+
+# Writing to the CSV file
+with open(csv_file, mode='w', newline='') as file:
+    writer = csv.DictWriter(file, fieldnames=fieldnames)
+    writer.writeheader()  # Write the header
+    writer.writerows(all_datasheet_scores)  # Write the data
