@@ -359,7 +359,7 @@ def evaluate(name="", rag_retreiver = None, json_q_a_file_path="./nrf52840.json"
 mcu_name = "nRF52840"
 chroma_db_path = f"hf_codellama_7b_exp/chroma_dbs/{mcu_name}_db"
 pickle_path = f"hf_codellama_7b_exp/pickle_files/{mcu_name}_summarized.pkl"
-dataset_path = f"hf_codellama_7b_exp/evaluation_mcu_svd_dataset/datasets_{mcu_name}"
+dataset_path = f"./evaluation_mcu_svd_dataset/datasets_{mcu_name}"
 
 all_datasheet_scores = []
 for key, file_paths in [(mcu_name, [chroma_db_path,pickle_path,dataset_path])]:
