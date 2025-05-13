@@ -190,7 +190,7 @@ def ask_bot(retriever_multi_vector_img, question, curr_model,few_shot_examples=N
     return answer.split("\n")[0].strip()
     # return answer
 
-def load_chroma_db(local_directory=chroma_db_path):
+def load_chroma_db(local_directory):
     return Chroma(persist_directory=local_directory, embedding_function=embedding)
 
 
