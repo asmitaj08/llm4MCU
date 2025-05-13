@@ -282,26 +282,26 @@ def evaluate(name="", rag_retreiver = None, json_q_a_file_path="./nrf52840.json"
     few_shot_examples = random.sample(q_a, 3)
     few_shot_context=""
 
-    # # Create the few-shot context
-    # few_shot_context = "\n".join(
-    #     f"Example Question: {example['messages'][0]['content']} {example['messages'][1]['content']}\n"
-    #     f"Example Answer: {example['messages'][2]['content']}"
-    #     for example in few_shot_examples
-    # ) + "\n\n"
+    # Create the few-shot context # i would just extract q & a it for openAI dataset
+    few_shot_context = "\n".join(
+        f"Example Question: {example['messages'][1]['content']}\n"
+        f"Example Answer: {example['messages'][2]['content']}"
+        for example in few_shot_examples
+    ) + "\n\n"
 
-    for example in few_shot_examples :
-        full_text = example["text"]
-        if '[/INST]' in full_text:
-            prompt_part, sep, answer_part = full_text.partition('[/INST]')
-            question = prompt_part + sep  # keep [INST]...[/INST]
-            ground_truth = answer_part.strip()
-        else:
-            # fallback if no [/INST] (just in case)
-            question = full_text
-            ground_truth = ""
-        few_shot_context+=f"Example Question:{question}\nExample Answer:{ground_truth}\n"
+    # for example in few_shot_examples :
+    #     full_text = example["text"]
+    #     if '[/INST]' in full_text:
+    #         prompt_part, sep, answer_part = full_text.partition('[/INST]')
+    #         question = prompt_part + sep  # keep [INST]...[/INST]
+    #         ground_truth = answer_part.strip()
+    #     else:
+    #         # fallback if no [/INST] (just in case)
+    #         question = full_text
+    #         ground_truth = ""
+    #     few_shot_context+=f"Example Question:{question}\nExample Answer:{ground_truth}\n"
     
-    few_shot_context+="\n\n"
+    # few_shot_context+="\n\n"
 
     # print(f"******few_shot_context : {few_shot_context}")
 
@@ -310,19 +310,20 @@ def evaluate(name="", rag_retreiver = None, json_q_a_file_path="./nrf52840.json"
     scores = []
 
     def process_q_a(q_a_pair):
-        full_text = q_a_pair["text"]
-        question=""
-        ground_truth=""
+        # full_text = q_a_pair["text"]
+        # question=""
+        # ground_truth=""
 
-        if '[/INST]' in full_text:
-            prompt_part, sep, answer_part = full_text.partition('[/INST]')
-            question = prompt_part + sep  # keep [INST]...[/INST]
-            ground_truth = answer_part.strip()
-        else:
-            # fallback if no [/INST] (just in case)
-            question = full_text
-            ground_truth = ""
-      
+        # if '[/INST]' in full_text:
+        #     prompt_part, sep, answer_part = full_text.partition('[/INST]')
+        #     question = prompt_part + sep  # keep [INST]...[/INST]
+        #     ground_truth = answer_part.strip()
+        # else:
+        #     # fallback if no [/INST] (just in case)
+        #     question = full_text
+        #     ground_truth = ""
+        question = q_a_pair["messages"][1]["content"]
+        ground_truth = q_a_pair["messages"][2]["content"]
         rag_model_output = ask_bot(rag_retreiver, question, model)
         few_shot_model_output = ask_bot(rag_retreiver, question, model, few_shot_context)
         ft_rag_model_output = ask_bot(rag_retreiver,question,ft_model)
