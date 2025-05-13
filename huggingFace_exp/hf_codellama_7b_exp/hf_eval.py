@@ -361,6 +361,10 @@ chroma_db_path = f"hf_codellama_7b_exp/chroma_dbs/{mcu_name}_db"
 pickle_path = f"hf_codellama_7b_exp/pickle_files/{mcu_name}_summarized.pkl"
 dataset_path = f"./evaluation_mcu_svd_dataset/datasets_{mcu_name}"
 
+assert os.path.exists(chroma_db_path)
+assert os.path.exists(pickle_path)
+assert os.path.exists(dataset_path)
+
 all_datasheet_scores = []
 for key, file_paths in [(mcu_name, [chroma_db_path,pickle_path,dataset_path])]:
     print(key)
