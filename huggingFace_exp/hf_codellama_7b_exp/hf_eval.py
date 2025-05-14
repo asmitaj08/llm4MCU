@@ -307,6 +307,7 @@ def evaluate(name="", rag_retreiver = None, json_q_a_file_path="./nrf52840.json"
 
     # Create a subset excluding the few-shot examples
     remaining_q_a = [example for example in q_a if example not in few_shot_examples]
+    print(f"**** Len of remaining_q_a : {remaining_q_a}")
     scores = []
 
     def process_q_a(q_a_pair):
@@ -324,6 +325,7 @@ def evaluate(name="", rag_retreiver = None, json_q_a_file_path="./nrf52840.json"
         #     ground_truth = ""
         question = q_a_pair["messages"][1]["content"]
         ground_truth = q_a_pair["messages"][2]["content"]
+        print(f"Processing q_a_pair : question: {question}, ground_truth : {ground_truth} ")
         rag_model_output = ask_bot(rag_retreiver, question, model)
         few_shot_model_output = ask_bot(rag_retreiver, question, model, few_shot_context)
         ft_rag_model_output = ask_bot(rag_retreiver,question,ft_model)
@@ -349,10 +351,14 @@ def evaluate(name="", rag_retreiver = None, json_q_a_file_path="./nrf52840.json"
 
         }
 
-    with ThreadPoolExecutor() as executor:
-        futures = [executor.submit(process_q_a, q_a_pair) for q_a_pair in remaining_q_a]
-        for future in tqdm(as_completed(futures), total=len(futures)):
-            scores.append(future.result())
+    # with ThreadPoolExecutor() as executor:
+    #     futures = [executor.submit(process_q_a, q_a_pair) for q_a_pair in remaining_q_a]
+    #     for future in tqdm(as_completed(futures), total=len(futures)):
+    #         scores.append(future.result())
+
+    for q_a_pair in remaining_q_a :
+        result = process_q_a(q_a_pair)
+        scores.append(result)
 
     return scores
 
