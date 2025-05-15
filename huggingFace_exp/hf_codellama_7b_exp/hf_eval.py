@@ -307,7 +307,7 @@ def evaluate(name="", rag_retreiver = None, json_q_a_file_path="./nrf52840.json"
 
     # Create a subset excluding the few-shot examples
     remaining_q_a = [example for example in q_a if example not in few_shot_examples]
-    print(f"**** Len of remaining_q_a : {remaining_q_a}")
+    print(f"**** Len of remaining_q_a : {len(remaining_q_a)}")
     scores = []
 
     def process_q_a(q_a_pair):
