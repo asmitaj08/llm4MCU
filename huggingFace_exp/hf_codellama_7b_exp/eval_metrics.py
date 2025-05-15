@@ -7,6 +7,8 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import Levenshtein
 from bert_score import score as bertscore
+import os
+import sys
 
 # pip install pandas sentence-transformers scikit-learn python-Levenshtein bert-score
 
@@ -158,9 +160,31 @@ if __name__ == "__main__":
     parser.add_argument("--workers", type=int, default=16)
     args = parser.parse_args()
 
-    df = pd.read_csv(args.input_csv)
     answer_cols = ['baseline model_output', 'few shot model_output', 'ft reg model_output','ft few shot model_output'] #openAI results 
     # answer_cols = ['baseline model_output', 'few shot model_output', 'ft model output', 'ft few_shot model output']
+
+
+    # 1. Check if file exists
+    if not os.path.isfile(args.input_csv):
+        print(f"ERROR: Input CSV file '{args.input_csv}' does not exist.")
+        sys.exit(1)
+
+    # 2. Load CSV header only (fast)
+    try:
+        df_sample = pd.read_csv(args.input_csv, nrows=0)
+    except Exception as e:
+        print(f"ERROR: Failed to read CSV file '{args.input_csv}': {e}")
+        sys.exit(1)
+
+    # 3. Check for required columns
+    missing_cols = [col for col in answer_cols if col not in df_sample.columns]
+    if missing_cols:
+        print(f"ERROR: Missing columns in CSV: {missing_cols}")
+        sys.exit(1)
+
+    print(f"Input CSV '{args.input_csv}' validated successfully with required columns: {answer_cols}")
+
+    df = pd.read_csv(args.input_csv)
     evaluated_df = evaluate_multi_answers(df, answer_cols, gt_col=args.gt_column, batch_size=args.batch_size, workers=args.workers)
     evaluated_df.to_csv(args.output_csv, index=False)
     print(f"Saved evaluated CSV to {args.output_csv}")
