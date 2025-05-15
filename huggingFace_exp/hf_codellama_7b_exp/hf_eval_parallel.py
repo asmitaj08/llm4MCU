@@ -33,6 +33,8 @@ import csv
 import json
 import random
 from peft import PeftModel
+import multiprocessing as mp
+
 
 
 load_dotenv()
@@ -45,23 +47,23 @@ embedding = HuggingFaceEmbeddings(model_name=embedd_model)
 
 eval_embedding = SentenceTransformer('all-MiniLM-L6-v2')
 
-print("Loading tokenizer...")
-tokenizer = AutoTokenizer.from_pretrained(base_model_id, use_fast=True)
+# print("Loading tokenizer...")
+# tokenizer = AutoTokenizer.from_pretrained(base_model_id, use_fast=True)
 
-print("Loading base model...")
-bnb_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_compute_dtype=torch.float16,
-    bnb_4bit_use_double_quant=True,
-    bnb_4bit_quant_type="nf4"
-)
+# print("Loading base model...")
+# bnb_config = BitsAndBytesConfig(
+#     load_in_4bit=True,
+#     bnb_4bit_compute_dtype=torch.float16,
+#     bnb_4bit_use_double_quant=True,
+#     bnb_4bit_quant_type="nf4"
+# )
 
-model = AutoModelForCausalLM.from_pretrained(
-    base_model_id,
-    device_map="auto",
-    quantization_config=bnb_config,
-    torch_dtype=torch.float16
-)
+# model = AutoModelForCausalLM.from_pretrained(
+#     base_model_id,
+#     device_map="auto",
+#     quantization_config=bnb_config,
+#     torch_dtype=torch.float16
+# )
 
 # # Create Hugging Face pipeline
 # pipe = pipeline(
@@ -81,7 +83,7 @@ model = AutoModelForCausalLM.from_pretrained(
 ft_model_dir = "codellama_7b/final_model"
 assert os.path.exists(ft_model_dir), f"Finetuned Model directory not found: {ft_model_dir}"
 # Load LoRA adapter
-ft_model = PeftModel.from_pretrained(model, ft_model_dir)
+# ft_model = PeftModel.from_pretrained(model, ft_model_dir)
 # # Create Hugging Face pipeline for finetuned model
 # pipe_ft = pipeline(
 #     "text-generation",
@@ -130,7 +132,7 @@ ft_model = PeftModel.from_pretrained(model, ft_model_dir)
 #     return ", ".join(lines)
 
 
-def ask_bot(retriever_multi_vector_img, question, curr_model,few_shot_examples=None) -> str:
+def ask_bot(retriever_multi_vector_img, question, curr_model,tokenizer,few_shot_examples=None) -> str:
     # Step 1: Retrieve relevant summaries (text + table + image) via RAG
     docs = retriever_multi_vector_img.get_relevant_documents(question)
     summaries = [
@@ -271,96 +273,175 @@ def compute_similarity(model_output: str, ground_truth: str) -> tuple:
     return cos_sim
 
 
-def evaluate(name="", rag_retreiver = None, json_q_a_file_path="./nrf52840.json"):
-    # Same as before
-    # with open(json_q_a_file_path, 'r') as file:
-    #     q_a = json.load(file)
-    with open(json_q_a_file_path, 'r', encoding='utf-8') as file:
-        q_a = [json.loads(line) for line in file]
+def worker_process(name,batch_q_a, few_shot_context, chroma_db_path, pickle_path):
 
-    # Randomly select 3 examples for few-shot context
-    few_shot_examples = random.sample(q_a, 3)
-    few_shot_context=""
+    # Load Retriever
+    rag_retriever = init_rag(chroma_db_path, pickle_path)
+    # Load model with bnb config
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_compute_dtype=torch.float16,
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_quant_type="nf4"
+    )
+    tokenizer = AutoTokenizer.from_pretrained(base_model_id, use_fast=True)
+    model = AutoModelForCausalLM.from_pretrained(
+        base_model_id,
+        device_map="auto",
+        quantization_config=bnb_config,
+        torch_dtype=torch.float16
+    )
 
-    # Create the few-shot context # i would just extract q & a it for openAI dataset
-    few_shot_context = "\n".join(
-        f"Example Question: {example['messages'][1]['content']}\n"
-        f"Example Answer: {example['messages'][2]['content']}"
-        for example in few_shot_examples
-    ) + "\n\n"
-
-    # for example in few_shot_examples :
-    #     full_text = example["text"]
-    #     if '[/INST]' in full_text:
-    #         prompt_part, sep, answer_part = full_text.partition('[/INST]')
-    #         question = prompt_part + sep  # keep [INST]...[/INST]
-    #         ground_truth = answer_part.strip()
-    #     else:
-    #         # fallback if no [/INST] (just in case)
-    #         question = full_text
-    #         ground_truth = ""
-    #     few_shot_context+=f"Example Question:{question}\nExample Answer:{ground_truth}\n"
-    
-    # few_shot_context+="\n\n"
-
-    # print(f"******few_shot_context : {few_shot_context}")
-
-    # Create a subset excluding the few-shot examples
-    remaining_q_a = [example for example in q_a if example not in few_shot_examples]
-    print(f"**** Len of remaining_q_a : {remaining_q_a}")
-    scores = []
-
-    def process_q_a(q_a_pair):
-        # full_text = q_a_pair["text"]
-        # question=""
-        # ground_truth=""
-
-        # if '[/INST]' in full_text:
-        #     prompt_part, sep, answer_part = full_text.partition('[/INST]')
-        #     question = prompt_part + sep  # keep [INST]...[/INST]
-        #     ground_truth = answer_part.strip()
-        # else:
-        #     # fallback if no [/INST] (just in case)
-        #     question = full_text
-        #     ground_truth = ""
+    ft_model = PeftModel.from_pretrained(model, ft_model_dir) 
+    # Process Batch
+    results = []
+    for q_a_pair in batch_q_a:
         question = q_a_pair["messages"][1]["content"]
         ground_truth = q_a_pair["messages"][2]["content"]
-        print(f"Processing q_a_pair : question: {question}, ground_truth : {ground_truth} ")
-        rag_model_output = ask_bot(rag_retreiver, question, model)
-        few_shot_model_output = ask_bot(rag_retreiver, question, model, few_shot_context)
-        ft_rag_model_output = ask_bot(rag_retreiver,question,ft_model)
-        ft_few_shot_model_output = ask_bot(rag_retreiver,question,ft_model,few_shot_context)
+
+        rag_model_output = ask_bot(rag_retriever, question, model, tokenizer)
+        few_shot_model_output = ask_bot(rag_retriever, question, model,tokenizer, few_shot_context)
+        ft_rag_model_output = ask_bot(rag_retriever, question, ft_model,tokenizer)
+        ft_few_shot_model_output = ask_bot(rag_retriever, question, ft_model,tokenizer, few_shot_context)
 
         rag_cos_sim = compute_similarity(rag_model_output, ground_truth)
         few_shot_cos_sim = compute_similarity(few_shot_model_output, ground_truth)
-        ft_reg_cos_sim = compute_similarity(ft_rag_model_output, ground_truth)
+        ft_rag_cos_sim = compute_similarity(ft_rag_model_output, ground_truth)
         ft_few_shot_cos_sim = compute_similarity(ft_few_shot_model_output, ground_truth)
 
-        return {
+        results.append({
             'datasheet': name,
             'question': question,
             'ground_truth': ground_truth,
             'baseline model_output': rag_model_output,
             'few shot model_output': few_shot_model_output,
-            'ft model output' : ft_rag_model_output,
-            'ft few_shot model output' : ft_few_shot_model_output,
+            'ft model output': ft_rag_model_output,
+            'ft few_shot model output': ft_few_shot_model_output,
             'baseline cosine_similarity': rag_cos_sim,
-            'ft cosine_similarity': ft_reg_cos_sim,
+            'ft cosine_similarity': ft_rag_cos_sim,
             'few_shot cosine_similarity': few_shot_cos_sim,
             'ft few_shot cosine_similarity': ft_few_shot_cos_sim
+        })
+    return results
 
-        }
 
-    # with ThreadPoolExecutor() as executor:
-    #     futures = [executor.submit(process_q_a, q_a_pair) for q_a_pair in remaining_q_a]
-    #     for future in tqdm(as_completed(futures), total=len(futures)):
-    #         scores.append(future.result())
 
-    for q_a_pair in remaining_q_a :
-        result = process_q_a(q_a_pair)
-        scores.append(result)
+def evaluate_parallel(name, chroma_db_path, pickle_path, json_q_a_file_path):
+    with open(json_q_a_file_path, 'r', encoding='utf-8') as file:
+        q_a = [json.loads(line) for line in file]
 
-    return scores
+    few_shot_examples = random.sample(q_a, 3)
+    few_shot_context = "\n".join(
+        f"Example Question: {ex['messages'][1]['content']}\nExample Answer: {ex['messages'][2]['content']}"
+        for ex in few_shot_examples
+    ) + "\n\n"
+
+    remaining_q_a = [example for example in q_a if example not in few_shot_examples]
+    batch_size = 4
+    batches = [remaining_q_a[i:i + batch_size] for i in range(0, len(remaining_q_a), batch_size)]
+    print(f"No. of batches to be processed : {len(batches)}, with batch_size : {batch_size}, total : {batch_size*len(batches)}")
+    ctx = mp.get_context('spawn')
+    with ctx.Pool(processes=2) as pool:
+        results = pool.starmap(worker_process, [
+            (name,batch, few_shot_context, chroma_db_path, pickle_path)
+            for batch in batches
+        ])
+
+    flattened_results = [item for sublist in results for item in sublist]
+    print(f"Len of flattened result after eval_parallel : {len(flattened_results)}")
+    return flattened_results
+
+
+# def evaluate(name="", rag_retreiver = None, json_q_a_file_path="./nrf52840.json"):
+#     # Same as before
+#     # with open(json_q_a_file_path, 'r') as file:
+#     #     q_a = json.load(file)
+#     with open(json_q_a_file_path, 'r', encoding='utf-8') as file:
+#         q_a = [json.loads(line) for line in file]
+
+#     # Randomly select 3 examples for few-shot context
+#     few_shot_examples = random.sample(q_a, 3)
+#     few_shot_context=""
+
+#     # Create the few-shot context # i would just extract q & a it for openAI dataset
+#     few_shot_context = "\n".join(
+#         f"Example Question: {example['messages'][1]['content']}\n"
+#         f"Example Answer: {example['messages'][2]['content']}"
+#         for example in few_shot_examples
+#     ) + "\n\n"
+
+#     # for example in few_shot_examples :
+#     #     full_text = example["text"]
+#     #     if '[/INST]' in full_text:
+#     #         prompt_part, sep, answer_part = full_text.partition('[/INST]')
+#     #         question = prompt_part + sep  # keep [INST]...[/INST]
+#     #         ground_truth = answer_part.strip()
+#     #     else:
+#     #         # fallback if no [/INST] (just in case)
+#     #         question = full_text
+#     #         ground_truth = ""
+#     #     few_shot_context+=f"Example Question:{question}\nExample Answer:{ground_truth}\n"
+    
+#     # few_shot_context+="\n\n"
+
+#     # print(f"******few_shot_context : {few_shot_context}")
+
+#     # Create a subset excluding the few-shot examples
+#     remaining_q_a = [example for example in q_a if example not in few_shot_examples]
+#     print(f"**** Len of remaining_q_a : {remaining_q_a}")
+#     scores = []
+
+#     def process_q_a(q_a_pair):
+#         # full_text = q_a_pair["text"]
+#         # question=""
+#         # ground_truth=""
+
+#         # if '[/INST]' in full_text:
+#         #     prompt_part, sep, answer_part = full_text.partition('[/INST]')
+#         #     question = prompt_part + sep  # keep [INST]...[/INST]
+#         #     ground_truth = answer_part.strip()
+#         # else:
+#         #     # fallback if no [/INST] (just in case)
+#         #     question = full_text
+#         #     ground_truth = ""
+#         question = q_a_pair["messages"][1]["content"]
+#         ground_truth = q_a_pair["messages"][2]["content"]
+#         print(f"Processing q_a_pair : question: {question}, ground_truth : {ground_truth} ")
+#         rag_model_output = ask_bot(rag_retreiver, question, model)
+#         few_shot_model_output = ask_bot(rag_retreiver, question, model, few_shot_context)
+#         ft_rag_model_output = ask_bot(rag_retreiver,question,ft_model)
+#         ft_few_shot_model_output = ask_bot(rag_retreiver,question,ft_model,few_shot_context)
+
+#         rag_cos_sim = compute_similarity(rag_model_output, ground_truth)
+#         few_shot_cos_sim = compute_similarity(few_shot_model_output, ground_truth)
+#         ft_reg_cos_sim = compute_similarity(ft_rag_model_output, ground_truth)
+#         ft_few_shot_cos_sim = compute_similarity(ft_few_shot_model_output, ground_truth)
+
+#         return {
+#             'datasheet': name,
+#             'question': question,
+#             'ground_truth': ground_truth,
+#             'baseline model_output': rag_model_output,
+#             'few shot model_output': few_shot_model_output,
+#             'ft model output' : ft_rag_model_output,
+#             'ft few_shot model output' : ft_few_shot_model_output,
+#             'baseline cosine_similarity': rag_cos_sim,
+#             'ft cosine_similarity': ft_reg_cos_sim,
+#             'few_shot cosine_similarity': few_shot_cos_sim,
+#             'ft few_shot cosine_similarity': ft_few_shot_cos_sim
+
+#         }
+
+#     # with ThreadPoolExecutor() as executor:
+#     #     futures = [executor.submit(process_q_a, q_a_pair) for q_a_pair in remaining_q_a]
+#     #     for future in tqdm(as_completed(futures), total=len(futures)):
+#     #         scores.append(future.result())
+
+#     for q_a_pair in remaining_q_a :
+#         result = process_q_a(q_a_pair)
+#         scores.append(result)
+
+#     return scores
 
 mcu_name = "nRF52840"
 chroma_db_path = f"hf_codellama_7b_exp/chroma_dbs/{mcu_name}_db"
@@ -375,15 +456,16 @@ all_datasheet_scores = []
 for key, file_paths in [(mcu_name, [chroma_db_path,pickle_path,dataset_path])]:
     print(key)
     chroma_db_path, pickle_path, eval_q_a_json_path = file_paths
-    rag_retreiver = init_rag(chroma_db_path, pickle_path)
+    # rag_retreiver = init_rag(chroma_db_path, pickle_path)
  
-    print("Finished Creating RAG pipeline")
+    # print("Finished Creating RAG pipeline")
 
     main_data_path = os.path.join(eval_q_a_json_path, "main_data.jsonl")
-    all_scores = evaluate(key, rag_retreiver, main_data_path)
-    print("Finished Evaluation")
+    # all_scores = evaluate(key, rag_retreiver, main_data_path)
+    all_scores = evaluate_parallel(key, chroma_db_path, pickle_path, main_data_path)
 
     all_datasheet_scores.extend(all_scores)
+    print(f"Finished Evaluation, len of all_datasheet_scores : {len(all_datasheet_scores)} ")
 
 
 csv_file = f"hf_codellama_7b_exp/eval_outcome/{mcu_name}_output.csv"
@@ -396,3 +478,5 @@ with open(csv_file, mode='w', newline='') as file:
     writer = csv.DictWriter(file, fieldnames=fieldnames)
     writer.writeheader()  # Write the header
     writer.writerows(all_datasheet_scores)  # Write the data
+
+print(f"Eval output csv saved to : {csv_file}")
