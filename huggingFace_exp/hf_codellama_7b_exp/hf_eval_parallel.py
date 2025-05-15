@@ -443,40 +443,43 @@ def evaluate_parallel(name, chroma_db_path, pickle_path, json_q_a_file_path):
 
 #     return scores
 
-mcu_name = "nRF52840"
-chroma_db_path = f"hf_codellama_7b_exp/chroma_dbs/{mcu_name}_db"
-pickle_path = f"hf_codellama_7b_exp/pickle_files/{mcu_name}_summarized.pkl"
-dataset_path = f"./evaluation_mcu_svd_dataset/datasets_{mcu_name}"
 
-assert os.path.exists(chroma_db_path)
-assert os.path.exists(pickle_path)
-assert os.path.exists(dataset_path)
+if __name__ == "__main__":
+    mcu_name = "nRF52840"
+    chroma_db_path = f"hf_codellama_7b_exp/chroma_dbs/{mcu_name}_db"
+    pickle_path = f"hf_codellama_7b_exp/pickle_files/{mcu_name}_summarized.pkl"
+    dataset_path = f"./evaluation_mcu_svd_dataset/datasets_{mcu_name}"
 
-all_datasheet_scores = []
-for key, file_paths in [(mcu_name, [chroma_db_path,pickle_path,dataset_path])]:
-    print(key)
-    chroma_db_path, pickle_path, eval_q_a_json_path = file_paths
-    # rag_retreiver = init_rag(chroma_db_path, pickle_path)
+    assert os.path.exists(chroma_db_path)
+    assert os.path.exists(pickle_path)
+    assert os.path.exists(dataset_path)
+
+    all_datasheet_scores = []
+    for key, file_paths in [(mcu_name, [chroma_db_path,pickle_path,dataset_path])]:
+        print(key)
+        chroma_db_path, pickle_path, eval_q_a_json_path = file_paths
+        # rag_retreiver = init_rag(chroma_db_path, pickle_path)
  
-    # print("Finished Creating RAG pipeline")
+        # print("Finished Creating RAG pipeline")
 
-    main_data_path = os.path.join(eval_q_a_json_path, "main_data.jsonl")
-    # all_scores = evaluate(key, rag_retreiver, main_data_path)
-    all_scores = evaluate_parallel(key, chroma_db_path, pickle_path, main_data_path)
+        main_data_path = os.path.join(eval_q_a_json_path, "main_data.jsonl")
+        # all_scores = evaluate(key, rag_retreiver, main_data_path)
+        all_scores = evaluate_parallel(key, chroma_db_path, pickle_path, main_data_path)
 
-    all_datasheet_scores.extend(all_scores)
+        all_datasheet_scores.extend(all_scores)
+    
     print(f"Finished Evaluation, len of all_datasheet_scores : {len(all_datasheet_scores)} ")
 
 
-csv_file = f"hf_codellama_7b_exp/eval_outcome/{mcu_name}_output.csv"
+    csv_file = f"hf_codellama_7b_exp/eval_outcome/{mcu_name}_output.csv"
 
-# Define the column names based on dictionary keys
-fieldnames = all_datasheet_scores[0].keys()
+    # Define the column names based on dictionary keys
+    fieldnames = all_datasheet_scores[0].keys()
 
-# Writing to the CSV file
-with open(csv_file, mode='w', newline='') as file:
-    writer = csv.DictWriter(file, fieldnames=fieldnames)
-    writer.writeheader()  # Write the header
-    writer.writerows(all_datasheet_scores)  # Write the data
+    # Writing to the CSV file
+    with open(csv_file, mode='w', newline='') as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()  # Write the header
+        writer.writerows(all_datasheet_scores)  # Write the data
 
-print(f"Eval output csv saved to : {csv_file}")
+    print(f"Eval output csv saved to : {csv_file}")
