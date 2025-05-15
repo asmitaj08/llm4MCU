@@ -159,7 +159,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     df = pd.read_csv(args.input_csv)
-    answer_cols = ['baseline model_output', 'few shot model_output'] #openAI, we stored answers for only these two 
+    answer_cols = ['baseline model_output', 'few shot model_output', 'ft reg model_output','ft few shot model_output'] #openAI results 
     # answer_cols = ['baseline model_output', 'few shot model_output', 'ft model output', 'ft few_shot model output']
     evaluated_df = evaluate_multi_answers(df, answer_cols, gt_col=args.gt_column, batch_size=args.batch_size, workers=args.workers)
     evaluated_df.to_csv(args.output_csv, index=False)
