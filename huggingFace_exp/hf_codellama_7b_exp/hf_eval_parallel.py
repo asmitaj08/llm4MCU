@@ -289,7 +289,8 @@ def worker_process(name,batch_q_a, few_shot_context, chroma_db_path, pickle_path
         base_model_id,
         device_map="auto",
         quantization_config=bnb_config,
-        torch_dtype=torch.float16
+        torch_dtype=torch.float16,
+        llm_int8_enable_fp32_cpu_offload=True
     )
 
     ft_model = PeftModel.from_pretrained(model, ft_model_dir) 
