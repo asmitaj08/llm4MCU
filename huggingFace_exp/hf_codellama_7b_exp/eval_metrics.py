@@ -9,6 +9,7 @@ import Levenshtein
 from bert_score import score as bertscore
 import os
 import sys
+import torch
 
 # pip install pandas sentence-transformers scikit-learn python-Levenshtein bert-score
 
@@ -18,23 +19,27 @@ import sys
 # Cosine similarity
 eval_embedding = SentenceTransformer('all-MiniLM-L6-v2', device='cuda')
 def compute_cosine(prediction, ground_truth):
-    embeddings = eval_embedding.encode([prediction, ground_truth])
+    embeddings = eval_embedding.encode([str(prediction), str(ground_truth)])
     return cosine_similarity([embeddings[0]], [embeddings[1]])[0][0]
 
 # Exact match after normalization
 # Check if the ground truth exists as a substring in the LLM's output after normalization (removing punctuation, lowercasing, etc.).
 # Useful for matching exact values, addresses, register names even if LLM adds extra text.
+def safe_normalize(text):
+    if pd.isna(text):
+        text = ""
+    text = str(text).lower().strip()
+    return re.sub(r'[^a-z0-9]', '', text)
+
 def exact_match_normalized(pred, gt):
-    def normalize(text):
-        return re.sub(r'[^a-z0-9]', '', text.lower().strip())
-    return normalize(gt) in normalize(pred)
+    return safe_normalize(gt) in safe_normalize(pred)
 
 # Token-level F1
 # Precision & Recall overlap between predicted tokens and ground truth tokens.
 # Useful when order doesn't matter (e.g., lists of registers).
 def token_f1(pred, gt):
-    pred_tokens = pred.lower().split()
-    gt_tokens = gt.lower().split()
+    pred_tokens = str(pred).lower().split()
+    gt_tokens = str(gt).lower().split()
     common = Counter(pred_tokens) & Counter(gt_tokens)
     num_same = sum(common.values())
     if num_same == 0:
@@ -43,27 +48,36 @@ def token_f1(pred, gt):
     recall = num_same / len(gt_tokens)
     return 2 * precision * recall / (precision + recall)
 
+
 # Levenshtein similarity (character edit distance)
 # Measures how many edits (insert, delete, substitute) are needed to convert prediction to ground truth.
 # Useful for addresses, hex values where small differences matter.
 def normalized_levenshtein(pred, gt):
+    pred = str(pred)
+    gt = str(gt)
     distance = Levenshtein.distance(pred, gt)
     max_len = max(len(pred), len(gt))
     if max_len == 0:
         return 1.0
     return 1 - distance / max_len
 
+
 # Numeric match
 # Extract numeric values (e.g., hex, decimal) from both prediction & ground truth, and compare.
 # Useful for answers that are supposed to be addresses or specific values.
 def numeric_match(pred, gt):
+    pred = str(pred)
+    gt = str(gt)
     numbers_pred = set(re.findall(r'\b0x[0-9a-fA-F]+\b|\b\d+\b', pred))
     numbers_gt = set(re.findall(r'\b0x[0-9a-fA-F]+\b|\b\d+\b', gt))
     return numbers_gt.issubset(numbers_pred)
 
+
 # Batched BERTScore on GPU ((Semantic Similarity))
 # Token-level contextual similarity (better than cosine on sentence level for factual QA).
 def compute_bertscore_batch(predictions, ground_truths, batch_size=64, device='cuda'):
+    predictions = [str(p) for p in predictions]
+    ground_truths = [str(g) for g in ground_truths]
     all_scores = []
     for i in range(0, len(predictions), batch_size):
         batch_preds = predictions[i:i+batch_size]
@@ -71,6 +85,7 @@ def compute_bertscore_batch(predictions, ground_truths, batch_size=64, device='c
         _, _, F1 = bertscore(batch_preds, batch_gts, lang='en', device=device)
         all_scores.extend(F1.tolist())
     return all_scores
+
 
 # Weighted scoring
 # Weighted_Score = (
