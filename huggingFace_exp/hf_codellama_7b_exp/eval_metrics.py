@@ -82,8 +82,7 @@ def compute_bertscore_batch(predictions, ground_truths, batch_size=64, device='c
     for i in range(0, len(predictions), batch_size):
         batch_preds = predictions[i:i+batch_size]
         batch_gts = ground_truths[i:i+batch_size]
-        # _, _, F1 = bertscore(batch_preds, batch_gts, lang='en', device=device)
-        _, _, F1 = bertscore(predictions, ground_truths, model_type="BAAI/bge-large-en-v1.5", device='cuda') #"BAAI/bge-large-en-v1.5" used during embedding
+        _, _, F1 = bertscore(batch_preds, batch_gts, lang='en', device=device)
         all_scores.extend(F1.tolist())
     return all_scores
 
