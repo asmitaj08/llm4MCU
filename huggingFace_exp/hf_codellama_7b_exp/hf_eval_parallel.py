@@ -290,7 +290,7 @@ def worker_process(name,batch_q_a, few_shot_context, chroma_db_path, pickle_path
         device_map="auto",
         quantization_config=bnb_config,
         torch_dtype=torch.float16,
-        llm_int8_enable_fp32_cpu_offload=True
+        # llm_int8_enable_fp32_cpu_offload=True
     )
 
     ft_model = PeftModel.from_pretrained(model, ft_model_dir) 
@@ -325,9 +325,95 @@ def worker_process(name,batch_q_a, few_shot_context, chroma_db_path, pickle_path
         })
     return results
 
+def ask_bot_batch(retriever, questions, model, tokenizer, few_shot_context=None):
+    prompts = []
+    for question in questions:
+        docs = retriever.get_relevant_documents(question)
+        summaries = [doc if isinstance(doc, str) else doc.page_content for doc in docs]
+        context = "\n- " + "\n- ".join(summaries) if summaries else ""
+
+        system_prompt = (
+            "You are an expert on microcontrollers and can provide detailed information about their peripherals, registers, and fields.\n"
+            "ONLY answer with valid register names, addresses, values or lists.\n"
+            "Do NOT provide full sentence for the answer\n"
+            "Do not explain. Do not repeat the question."
+        )
+
+        prompt = f"[INST] <<SYS>>\n{system_prompt}\n<</SYS>>\n\n"
+        if few_shot_context:
+            prompt += few_shot_context + "\n"
+        prompt += f"Now answer:\nContext:{context}\nQuestion: {question}\nAnswer: [/INST]"
+
+        prompts.append(prompt)
+
+    inputs = tokenizer(prompts, return_tensors="pt", padding=True, truncation=True).to(model.device)
+
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=768,
+            do_sample=False,
+            pad_token_id=tokenizer.eos_token_id
+        )
+
+    outputs_text = tokenizer.batch_decode(outputs, skip_special_tokens=True)
+    answers = [output.replace(prompt, "").strip().split("\n")[0].strip() for prompt, output in zip(prompts, outputs_text)]
+
+    return answers
 
 
-def evaluate_parallel(name, chroma_db_path, pickle_path, json_q_a_file_path):
+def process_batch(batch_q_a, few_shot_context, chroma_db_path, pickle_path, base_model_id, ft_model_dir):
+    rag_retreiver = init_rag(chroma_db_path, pickle_path)
+
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_compute_dtype="float16",
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_quant_type="nf4"
+    )
+    tokenizer = AutoTokenizer.from_pretrained(base_model_id, use_fast=True)
+    model = AutoModelForCausalLM.from_pretrained(
+        base_model_id,
+        device_map="auto",
+        quantization_config=bnb_config,
+        torch_dtype="float16",
+        # llm_int8_enable_fp32_cpu_offload=True
+    )
+    ft_model = PeftModel.from_pretrained(model, ft_model_dir)
+
+    eval_embedding = SentenceTransformer('all-MiniLM-L6-v2')
+
+    def compute_similarity(output, ground_truth):
+        embeddings = eval_embedding.encode([output, ground_truth])
+        return cosine_similarity([embeddings[0]], [embeddings[1]])[0][0]
+
+    questions = [q["messages"][1]["content"] for q in batch_q_a]
+    ground_truths = [q["messages"][2]["content"] for q in batch_q_a]
+
+    rag_outputs = ask_bot_batch(rag_retreiver, questions, model, tokenizer)
+    fewshot_outputs = ask_bot_batch(rag_retreiver, questions, model, tokenizer, few_shot_context)
+    ft_rag_outputs = ask_bot_batch(rag_retreiver, questions, ft_model, tokenizer)
+    ft_fewshot_outputs = ask_bot_batch(rag_retreiver, questions, ft_model, tokenizer, few_shot_context)
+
+    results = []
+    for i in range(len(questions)):
+        results.append({
+            'question': questions[i],
+            'ground_truth': ground_truths[i],
+            'baseline model_output': rag_outputs[i],
+            'few shot model_output': fewshot_outputs[i],
+            'ft model output': ft_rag_outputs[i],
+            'ft few_shot model output': ft_fewshot_outputs[i],
+            'baseline cosine_similarity': compute_similarity(rag_outputs[i], ground_truths[i]),
+            'ft cosine_similarity': compute_similarity(ft_rag_outputs[i], ground_truths[i]),
+            'few_shot cosine_similarity': compute_similarity(fewshot_outputs[i], ground_truths[i]),
+            'ft few_shot cosine_similarity': compute_similarity(ft_fewshot_outputs[i], ground_truths[i])
+        })
+
+    return results
+
+
+def evaluate_parallel(name, chroma_db_path, pickle_path, json_q_a_file_path, base_model_id, ft_model_dir, processes):
     with open(json_q_a_file_path, 'r', encoding='utf-8') as file:
         q_a = [json.loads(line) for line in file]
 
@@ -342,15 +428,62 @@ def evaluate_parallel(name, chroma_db_path, pickle_path, json_q_a_file_path):
     batches = [remaining_q_a[i:i + batch_size] for i in range(0, len(remaining_q_a), batch_size)]
     print(f"No. of batches to be processed : {len(batches)}, with batch_size : {batch_size}, total : {batch_size*len(batches)}")
     ctx = mp.get_context('spawn')
-    with ctx.Pool(processes=2) as pool:
-        results = pool.starmap(worker_process, [
-            (name,batch, few_shot_context, chroma_db_path, pickle_path)
+    with ctx.Pool(processes=processes) as pool:
+        results = pool.starmap(process_batch, [
+            (batch, few_shot_context, chroma_db_path, pickle_path, base_model_id, ft_model_dir)
             for batch in batches
         ])
 
     flattened_results = [item for sublist in results for item in sublist]
     print(f"Len of flattened result after eval_parallel : {len(flattened_results)}")
     return flattened_results
+
+
+def estimate_max_processes(base_model_id, ft_model_dir, vram_limit_percent=0.85):
+    import subprocess
+    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+    from peft import PeftModel
+
+    def get_vram_usage():
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.total,memory.used", "--format=csv,noheader,nounits"],
+            stdout=subprocess.PIPE, text=True
+        )
+        total, used = map(int, result.stdout.strip().split(','))
+        return total, used, used / total
+
+    models = []
+    count = 0
+
+    while True:
+        print(f"Loading model instance #{count + 1} ...")
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype="float16",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4"
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            base_model_id,
+            device_map="auto",
+            quantization_config=bnb_config,
+            torch_dtype="float16",
+            # llm_int8_enable_fp32_cpu_offload=True
+        )
+        model = PeftModel.from_pretrained(model, ft_model_dir)
+        models.append(model)
+
+        _, used, ratio = get_vram_usage()
+        print(f"VRAM Used: {used} MB ({ratio*100:.1f}%)")
+
+        if ratio >= vram_limit_percent:
+            print(f"\nSafe VRAM capacity reached at {ratio*100:.1f}%")
+            print(f"Recommended processes = {count}")
+            break
+
+        count += 1
+
+    return count
 
 
 # def evaluate(name="", rag_retreiver = None, json_q_a_file_path="./nrf52840.json"):
@@ -450,37 +583,26 @@ if __name__ == "__main__":
     chroma_db_path = f"hf_codellama_7b_exp/chroma_dbs/{mcu_name}_db"
     pickle_path = f"hf_codellama_7b_exp/pickle_files/{mcu_name}_summarized.pkl"
     dataset_path = f"./evaluation_mcu_svd_dataset/datasets_{mcu_name}"
+    main_data_path = os.path.join(dataset_path, "main_data.jsonl")
 
-    assert os.path.exists(chroma_db_path)
-    assert os.path.exists(pickle_path)
-    assert os.path.exists(dataset_path)
+    base_model_id = "codellama/CodeLlama-7b-Instruct-hf"
+    ft_model_dir = "codellama_7b/final_model"
 
-    all_datasheet_scores = []
-    for key, file_paths in [(mcu_name, [chroma_db_path,pickle_path,dataset_path])]:
-        print(key)
-        chroma_db_path, pickle_path, eval_q_a_json_path = file_paths
-        # rag_retreiver = init_rag(chroma_db_path, pickle_path)
- 
-        # print("Finished Creating RAG pipeline")
+    print("Profiling VRAM to determine optimal process count...")
+    # processes = estimate_max_processes(base_model_id, ft_model_dir)
+    # processes = max(1, processes//2)
+    processes=2
+    print(f"Using {processes} parallel processes for evaluation.")
 
-        main_data_path = os.path.join(eval_q_a_json_path, "main_data.jsonl")
-        # all_scores = evaluate(key, rag_retreiver, main_data_path)
-        all_scores = evaluate_parallel(key, chroma_db_path, pickle_path, main_data_path)
-
-        all_datasheet_scores.extend(all_scores)
-    
-    print(f"Finished Evaluation, len of all_datasheet_scores : {len(all_datasheet_scores)} ")
-
+    all_scores = evaluate_parallel(mcu_name, chroma_db_path, pickle_path, main_data_path, base_model_id, ft_model_dir, processes)
 
     csv_file = f"hf_codellama_7b_exp/eval_outcome/{mcu_name}_output.csv"
+    fieldnames = all_scores[0].keys()
 
-    # Define the column names based on dictionary keys
-    fieldnames = all_datasheet_scores[0].keys()
-
-    # Writing to the CSV file
+    import csv
     with open(csv_file, mode='w', newline='') as file:
         writer = csv.DictWriter(file, fieldnames=fieldnames)
-        writer.writeheader()  # Write the header
-        writer.writerows(all_datasheet_scores)  # Write the data
+        writer.writeheader()
+        writer.writerows(all_scores)
 
-    print(f"Eval output csv saved to : {csv_file}")
+    print(f"Results written to {csv_file}")

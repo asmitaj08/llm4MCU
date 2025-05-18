@@ -307,7 +307,8 @@ def evaluate(name="", rag_retreiver = None, json_q_a_file_path="./nrf52840.json"
 
     # Create a subset excluding the few-shot examples
     remaining_q_a = [example for example in q_a if example not in few_shot_examples]
-    print(f"**** Len of remaining_q_a : {len(remaining_q_a)}")
+    len_remaining_q_a = len(remaining_q_a)
+    print(f"**** Len of remaining_q_a : {len_remaining_q_a}")
     scores = []
 
     def process_q_a(q_a_pair):
@@ -325,7 +326,7 @@ def evaluate(name="", rag_retreiver = None, json_q_a_file_path="./nrf52840.json"
         #     ground_truth = ""
         question = q_a_pair["messages"][1]["content"]
         ground_truth = q_a_pair["messages"][2]["content"]
-        print(f"Processing q_a_pair : question: {question}, ground_truth : {ground_truth} ")
+        # print(f"Processing q_a_pair : question: {question}, ground_truth : {ground_truth} ")
         rag_model_output = ask_bot(rag_retreiver, question, model)
         few_shot_model_output = ask_bot(rag_retreiver, question, model, few_shot_context)
         ft_rag_model_output = ask_bot(rag_retreiver,question,ft_model)
@@ -355,8 +356,10 @@ def evaluate(name="", rag_retreiver = None, json_q_a_file_path="./nrf52840.json"
     #     futures = [executor.submit(process_q_a, q_a_pair) for q_a_pair in remaining_q_a]
     #     for future in tqdm(as_completed(futures), total=len(futures)):
     #         scores.append(future.result())
-
+    count=0
     for q_a_pair in remaining_q_a :
+        count+=1
+        print(f"********* Processing : {count}/{len_remaining_q_a}")
         result = process_q_a(q_a_pair)
         scores.append(result)
 
@@ -377,7 +380,7 @@ for key, file_paths in [(mcu_name, [chroma_db_path,pickle_path,dataset_path])]:
     chroma_db_path, pickle_path, eval_q_a_json_path = file_paths
     rag_retreiver = init_rag(chroma_db_path, pickle_path)
  
-    print("Finished Creating RAG pipeline")
+    print("****Finished Creating RAG pipeline")
 
     main_data_path = os.path.join(eval_q_a_json_path, "main_data.jsonl")
     all_scores = evaluate(key, rag_retreiver, main_data_path)
