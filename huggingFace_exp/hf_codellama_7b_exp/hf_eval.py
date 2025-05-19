@@ -309,6 +309,8 @@ def evaluate(name="", rag_retreiver = None, json_q_a_file_path="./nrf52840.json"
     remaining_q_a = [example for example in q_a if example not in few_shot_examples]
     len_remaining_q_a = len(remaining_q_a)
     print(f"**** Len of remaining_q_a : {len_remaining_q_a}")
+    test_samples = random.sample(remaining_q_a, 1000) # capping it to 1000 due to inference time
+    len_test_samples = len(test_samples)
     scores = []
 
     def process_q_a(q_a_pair):
@@ -359,7 +361,7 @@ def evaluate(name="", rag_retreiver = None, json_q_a_file_path="./nrf52840.json"
     count=0
     for q_a_pair in remaining_q_a :
         count+=1
-        print(f"********* Processing : {count}/{len_remaining_q_a}")
+        print(f"********* Processing : {count}/{len_test_samples}. N.B: initial no. of q_a : {len_remaining_q_a}")
         result = process_q_a(q_a_pair)
         scores.append(result)
 
