@@ -1,4 +1,3 @@
-print("Helloo")
 #This script is for partitioning a given pdf into summaries text,images, tables; and store it in chromadb vector store, and pickle file that we store locally and directly use later to save time.
 # It uses ollama with lanchain; chain embedding model depending on model that you plan to use.
 from unstructured.partition.pdf import partition_pdf

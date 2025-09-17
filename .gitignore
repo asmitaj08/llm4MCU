@@ -5,3 +5,4 @@ figures/*
 multimodal-rag.ipynb
 .qodo
 **/*.zip
+**/*.log

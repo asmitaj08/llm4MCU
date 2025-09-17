@@ -26,7 +26,7 @@ source /software/conda3/4.X/etc/profile.d/conda.sh && \
 	/home/user/ollama/bin/ollama serve
 ```
 
-#### running jupyter notebook, that I access on my local machine using ssh tunneling 
+#### running jupyter notebook, that can be accessed on  local machine using ssh tunneling 
 
 ```
 #!/bin/bash -l 
@@ -45,10 +45,10 @@ source /software/conda3/4.X/etc/profile.d/conda.sh && \
 	conda activate llm_env && \
 	#/home/user/ollama/bin/ollama serve
     # python3 -u /home/user/pdf_script.py > log_nrf52840.log 2>&1
-    jupyter notebook --no-browser  --port=8877 --NotebookApp.allow_origin='*' --NotebookApp.ip='0.0.0.0' --notebook-dir="/home/user/prj/"
+    jupyter notebook --no-browser  --port=xxxx --NotebookApp.allow_origin='*' --NotebookApp.ip='0.0.0.0' --notebook-dir="/home/user/path/"
 ```
 
-* Then, in my local machine,  I do `ssh -L 6677:localhost:8877 -J user@hpc.xx.xx user@hpc-node` , now you can directly jump to your node in the hpc cluster, and on local host, you can access jupyter notebook using localhost:6677 (it will ask you for token, then check `jupyter_nb-%j.output` where it gets logged)
+* Then, in my local machine,  `ssh -L xxxx:localhost:xxxx -J user@hpc.xx.xx user@hpc-node` , now you can directly jump to your node in the hpc cluster, and on local host, you can access jupyter notebook using localhost:xxxx (it will ask you for token, then check `jupyter_nb-%j.output` where it gets logged)
 
 ### Running Inside Jupyter Notebook
 * Ollama has python APIs that you can use.

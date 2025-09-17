@@ -86,7 +86,7 @@ def compute_bertscore_batch(predictions, ground_truths, batch_size=64, device='c
         all_scores.extend(F1.tolist())
     return all_scores
 
-
+# Not used as of now
 # Weighted scoring
 # Weighted_Score = (
 #     0.3 * E +            # Exact match is top priority
@@ -117,7 +117,7 @@ def compute_weighted_score(metrics):
 # Pass if weighted_score >= 0.7 (high accuracy)
 # Partial if 0.5 <= score < 0.7
 # Fail if < 0.5
-def classify_score(score):
+def classify_score(score): # not used as of now
     if score >= 0.7:
         return "Pass"
     elif score >= 0.5:

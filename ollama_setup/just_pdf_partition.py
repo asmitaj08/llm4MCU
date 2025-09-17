@@ -1,4 +1,3 @@
-print("Helloo")
 #This script is for partitioning a given pdf into text,images, tables; and store it in a pickle file that can later be retrived for embedding
 from unstructured.partition.pdf import partition_pdf
 import pytesseract

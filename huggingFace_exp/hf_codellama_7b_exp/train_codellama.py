@@ -17,7 +17,7 @@ from transformers import (
 from peft import LoraConfig, get_peft_model, TaskType
 
 # ─── 1) Fixed scratch directory ───────────────────────────────
-SCRATCH_DIR = "/scratch/jacks.local/huser/user"
+SCRATCH_DIR = "/scratch/test.local/huser/user"
 os.makedirs(SCRATCH_DIR, exist_ok=True)
 os.chdir(SCRATCH_DIR)
 
